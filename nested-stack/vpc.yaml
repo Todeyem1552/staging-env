@@ -1,0 +1,197 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'VPC Stack with SSM Parameters and Internet Access Stack'
+
+Parameters:
+  VpcCidr:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/dev/network/vpc/cidr'
+    Description: 'VPC CIDR from SSM Parameter Store'
+
+  RegionAZ:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/dev/network/az'
+    Description: 'First Availability Zone from SSM Parameter Store'
+
+  RegionAZ2:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/dev/network/az2'
+    Description: 'Second Availability Zone from SSM Parameter Store'
+
+  tagName:
+    Type: String
+    Default: 'Name'
+
+  tagValue:
+    Type: String
+    Default: 'vpc'
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-vpc'
+        - Key: !Ref tagName
+          Value: !Ref tagValue
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-igw'
+        - Key: !Ref tagName
+          Value: !Ref tagValue
+
+  AttachInternetGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 4, 8]]
+      AvailabilityZone: !Ref RegionAZ
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public-subnet-a'
+        - Key: !Ref tagName
+          Value: !Ref tagValue
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 4, 8]]
+      AvailabilityZone: !Ref RegionAZ2
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public-subnet-b'
+        - Key: !Ref tagName
+          Value: !Ref tagValue
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public-rt'
+        - Key: !Ref tagName
+          Value: !Ref tagValue
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachInternetGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  DatabaseSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [2, !Cidr [!Ref VpcCidr, 4, 8]]
+      AvailabilityZone: !Ref RegionAZ
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-database-subnet'
+        - Key: !Ref tagName
+          Value: !Ref tagValue
+
+  DatabaseSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [3, !Cidr [!Ref VpcCidr, 4, 8]]
+      AvailabilityZone: !Ref RegionAZ2
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-database-subnet2'
+        - Key: !Ref tagName
+          Value: !Ref tagValue
+
+  DatabaseRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-database-rt'
+        - Key: !Ref tagName
+          Value: !Ref tagValue
+
+  DatabaseRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachInternetGateway
+    Properties:
+      RouteTableId: !Ref DatabaseRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  DatabaseSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DatabaseSubnet
+      RouteTableId: !Ref DatabaseRouteTable
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS
+      SubnetIds:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+        - !Ref DatabaseSubnet
+        - !Ref DatabaseSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-database-subnet-group'
+        - Key: !Ref tagName
+          Value: !Ref tagValue
+
+Outputs:
+  VpcId:
+    Description: VPC ID
+    Value: !GetAtt VPC.VpcId
+
+  PublicSubnetId:
+    Description: First Public Subnet ID (for backward compatibility)
+    Value: !GetAtt PublicSubnetA.SubnetId
+
+  PublicSubnetIds:
+    Description: List of Public Subnet IDs
+    Value: !Join [ ",", [ !Ref PublicSubnetA, !Ref PublicSubnetB ] ]
+
+  DatabaseSubnetId:
+    Description: Database Subnet ID
+    Value: !GetAtt DatabaseSubnet.SubnetId
+
+  DatabaseSubnetGroupName:
+    Description: Database Subnet Group Name
+    Value: !Ref DatabaseSubnetGroup

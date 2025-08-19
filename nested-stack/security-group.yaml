@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Security Group for ELB, EC2, MySQL instances Stack
+
+Parameters:
+  VPC:
+    Type: String
+    Description: 'VPC ID to associate with the Security Group'
+
+  tagName:
+    Type: String
+    Default: 'Name'
+
+  tagValue:
+    Type: String
+    Default: 'vpc'
+
+Resources:
+  ElBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${AWS::StackName}-elb-sg'
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-elb-sg'
+        - Key: !Ref tagName
+          Value: !Ref tagValue
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+
+  Ec2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${AWS::StackName}-ec2-sg'
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ec2-sg'
+        - Key: !Ref tagName 
+          Value: !Ref tagValue
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ElBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 3333
+          ToPort: 3333
+          SourceSecurityGroupId: !Ref ElBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId: !Ref ElBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 3001
+          ToPort: 3001
+          SourceSecurityGroupId: !Ref ElBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 3003
+          ToPort: 3003
+          SourceSecurityGroupId: !Ref ElBSecurityGroup
+  
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${AWS::StackName}-db-sg'
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-db-sg'
+        - Key: !Ref tagName
+          Value: !Ref tagValue
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref Ec2SecurityGroup
+
+Outputs:
+  ElBSecurityGroupId:
+    Description: 'ELB Security Group ID'
+    Value: !GetAtt ElBSecurityGroup.GroupId
+
+  Ec2SecurityGroupId:
+    Description: 'EC2 Security Group ID'
+    Value: !GetAtt Ec2SecurityGroup.GroupId
+
+  DatabaseSecurityGroupId:
+    Description: 'Database Security Group ID'
+    Value: !GetAtt  DatabaseSecurityGroup.GroupId
+  

@@ -1,0 +1,23 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: WAF and ALB Association Stack
+Parameters:
+  ApplicationLoadBalancerArn:
+    Type: String
+    Description: ARN of the Application Load Balancer to associate with WAF
+
+  WebACLArn:
+    Type: String
+    Description: ARN of the WAF WebACL to associate with the ALB
+
+Resources:
+
+  WAFALBAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Ref ApplicationLoadBalancerArn
+      WebACLArn: !Ref WebACLArn
+
+Outputs:
+  WAFALBAssociationId:
+    Description: ID of the WAF and ALB association
+    Value: !Ref WAFALBAssociation

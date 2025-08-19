@@ -1,0 +1,135 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Master Stack for Network, Security Groups, EC2, RDS, and ELB
+
+Parameters:
+  NestedStackS3Prefix:
+    Type: String
+    Description: S3 URL prefix for nested stack templates (e.g., https://s3.amazonaws.com/bucket-name/path/)
+
+  tagName:
+    Type: String
+    Default: Name
+
+  tagValue:
+    Type: String
+    Default: vpc
+
+Resources:
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub '${NestedStackS3Prefix}vpc.yaml'
+      Parameters:
+        tagName: !Ref tagName
+        tagValue: !Ref tagValue
+
+  SecurityGroupStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: NetworkStack
+    Properties:
+      TemplateURL: !Sub '${NestedStackS3Prefix}security-group.yaml'
+      Parameters:
+        VPC: !GetAtt NetworkStack.Outputs.VpcId
+        tagName: !Ref tagName
+        tagValue: !Ref tagValue
+
+  RDStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - NetworkStack
+      - SecurityGroupStack
+    Properties:
+      TemplateURL: !Sub '${NestedStackS3Prefix}RDS.yaml'
+      Parameters:
+        DBSecurityGroup: !GetAtt SecurityGroupStack.Outputs.DatabaseSecurityGroupId
+        DatabaseSubnetGroupName: !GetAtt NetworkStack.Outputs.DatabaseSubnetGroupName
+        tagName: !Ref tagName
+        tagValue: !Ref tagValue
+
+  LaunchTemplateStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - NetworkStack
+      - SecurityGroupStack
+      - RDStack
+    Properties:
+      TemplateURL: !Sub '${NestedStackS3Prefix}launch-template.yaml'
+      Parameters:
+        SubnetId: !GetAtt NetworkStack.Outputs.PublicSubnetId
+        DBHost: !GetAtt RDStack.Outputs.RDSInstanceEndpoint
+        EC2SecurityGroup: !GetAtt SecurityGroupStack.Outputs.Ec2SecurityGroupId
+
+  EC2Stack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - NetworkStack
+      - SecurityGroupStack
+      - LaunchTemplateStack
+    Properties:
+      TemplateURL: !Sub '${NestedStackS3Prefix}ec2.yaml'
+      Parameters:
+        LaunchTemplateId: !GetAtt LaunchTemplateStack.Outputs.LaunchTemplateId
+        LatestVersionNumber: !GetAtt LaunchTemplateStack.Outputs.LatestVersionNumber
+        tagName: !Ref tagName
+        tagValue: !Ref tagValue
+
+  ElbStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - NetworkStack
+      - SecurityGroupStack
+      - EC2Stack
+      - RDStack
+    Properties:
+      TemplateURL: !Sub '${NestedStackS3Prefix}elb.yaml'
+      Parameters:
+        VpcId: !GetAtt NetworkStack.Outputs.VpcId
+        SubnetIds: !GetAtt NetworkStack.Outputs.PublicSubnetIds  # already a string!
+        EC2Instance: !GetAtt EC2Stack.Outputs.InstanceId
+        ElbSecurityGroup: !GetAtt SecurityGroupStack.Outputs.ElBSecurityGroupId
+        tagName: !Ref tagName
+        tagValue: !Ref tagValue
+
+  WafStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - ElbStack
+    Properties:
+      TemplateURL: !Sub '${NestedStackS3Prefix}waf.yaml'
+
+  WafAlbAssociationStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - WafStack
+      - ElbStack
+    Properties:
+      TemplateURL: !Sub '${NestedStackS3Prefix}waf-alb-association.yaml'
+      Parameters:
+        ApplicationLoadBalancerArn: !GetAtt ElbStack.Outputs.ALBArn
+        WebACLArn: !GetAtt WafStack.Outputs.WebACLArn
+
+
+Outputs:
+  VpcId:
+    Description: VPC ID
+    Value: !GetAtt NetworkStack.Outputs.VpcId
+
+  PublicSubnetId:
+    Description: Public Subnet ID
+    Value: !GetAtt NetworkStack.Outputs.PublicSubnetId
+
+  DatabaseSubnetId:
+    Description: Database Subnet ID
+    Value: !GetAtt NetworkStack.Outputs.DatabaseSubnetId
+
+  ElBSecurityGroupId:
+    Description: ELB Security Group ID
+    Value: !GetAtt SecurityGroupStack.Outputs.ElBSecurityGroupId
+
+  Ec2SecurityGroupId:
+    Description: EC2 Security Group ID
+    Value: !GetAtt SecurityGroupStack.Outputs.Ec2SecurityGroupId
+
+  DatabaseSecurityGroupId:
+    Description: Database Security Group ID
+    Value: !GetAtt SecurityGroupStack.Outputs.DatabaseSecurityGroupId

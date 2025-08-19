@@ -1,0 +1,47 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EC2 Instance via Launch Template with IAM Role
+
+Parameters:
+  LaunchTemplateId:
+    Type: String
+    Default: '12342'
+    Description: Launch Template ID to use for the EC2 instance
+
+  LatestVersionNumber:
+    Type: String
+    Default: '1'
+    Description: Latest version number of the Launch Template
+
+  tagName:
+    Type: String
+    Default: 'Name'
+    Description: The tag name to use for resources
+
+  tagValue:
+    Type: String
+    Default: 'vpc'
+    Description: The tag value to use for resources
+
+Resources:
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplateId
+        Version: !Ref LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ec2-instance'
+        - Key: wayber-cpcompass-ec2
+          Value: dev
+        - Key: !Ref tagName
+          Value: !Ref tagValue
+
+Outputs:
+  InstanceId:
+    Description: ID of the EC2 instance
+    Value: !Ref EC2Instance
+
+  PublicIP:
+    Description: Public IP of the EC2 instance
+    Value: !GetAtt EC2Instance.PublicIp

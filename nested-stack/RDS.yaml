@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: RDS instance with security group
+
+Parameters:
+  DBInstanceIdentifier:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/dev/database/rds/instance/identifier'
+    Description: The name of the RDS instance
+
+  DBUsername:
+    Description: The master username for the database
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/dev/database/rds/username'
+
+  DBPassword:
+    Description: The master password for the database
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/dev/database/rds/password'
+    MinLength: 8
+    MaxLength: 41
+
+  # DBAllocatedStorage:
+  #   Type: 'AWS::SSM::Parameter::Value<String>'
+  #   Default: '/dev/database/rds/allocated/storage'
+  #   Description: The size of the database (GB)
+
+  DBInstanceClass:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/dev/database/rds/instance/class'
+    Description: RDS instance class
+
+  EngineVersion:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/dev/database/rds/engine/version'
+    Description: The version of the database engine
+
+  DBSecurityGroup:
+    Type: String
+    Description: Security Group ID for the RDS instance
+
+  DatabaseSubnetGroupName:
+    Type: String
+    Description: Subnet Group ID for the RDS instance
+  
+  tagName:
+    Type: String
+    Default: 'Name'
+    Description: The tag name to use for resources
+
+  tagValue:
+    Type: String
+    Default: 'vpc'
+    Description: The tag value to use for resources
+
+Resources:
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Ref DBInstanceIdentifier
+      # AllocatedStorage: !Ref DBAllocatedStorage
+      AllocatedStorage: 20
+      DBInstanceClass: !Ref DBInstanceClass
+      Engine: mysql
+      EngineVersion: !Ref EngineVersion
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      VPCSecurityGroups:
+        - !Ref DBSecurityGroup
+      DBSubnetGroupName: !Ref DatabaseSubnetGroupName
+      BackupRetentionPeriod: 7
+      MultiAZ: false
+      PubliclyAccessible: Yes
+      DeletionProtection: false
+      StorageEncrypted: true
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-rds-instance'
+        - Key: !Ref tagName
+          Value: !Ref tagValue
+
+Outputs:
+  RDSInstanceEndpoint:
+    Description: The connection endpoint
+    Value: !GetAtt RDSInstance.Endpoint.Address
+
+  RDSInstancePort:
+    Description: The port number the database listens on
+    Value: !GetAtt RDSInstance.Endpoint.Port

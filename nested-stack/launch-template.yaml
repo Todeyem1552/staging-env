@@ -1,0 +1,190 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Launch Template with Docker Compose Setup
+
+Parameters:
+  DBHost:
+    Type: String
+    Description: Database host
+
+  EC2SecurityGroup:
+    Type: String
+    Description: Security Group ID for EC2 instance
+
+  SubnetId:
+    Type: String
+    Description: Subnet ID to associate the EC2 instance
+
+  DBUsername:
+    Description: The master username for the database
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/dev/database/rds/username'
+
+  DBPassword:
+    Description: The master password for the database
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/dev/database/rds/password'
+    MinLength: 8
+    MaxLength: 41
+
+  KeyName:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: '/dev/network/key-pair/name'
+    Description: Existing EC2 KeyPair to enable SSH access
+
+  InstanceType:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: '/dev/network/instance/type'
+    Description: EC2 instance type
+
+  LinuxAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64
+    Description: Latest Amazon Linux 2023 AMI ID
+
+  EC2InstanceRole:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: '/dev/iam/ec2/role'
+    Description: IAM Role for the EC2 instance
+
+  Ec2Region:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /app/config/ec2Region
+    Description: AWS Region for the EC2 instance
+
+  AccountId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /app/config/accountId
+    Description: AWS Account ID for the EC2 instance
+
+Resources:
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2InstanceRole
+      Path: /
+
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${AWS::StackName}-lt'
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Name: !Ref EC2InstanceProfile
+        ImageId: !Ref LinuxAmiId
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyName
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: 35
+              VolumeType: gp2
+              DeleteOnTermination: true
+        NetworkInterfaces:
+          - AssociatePublicIpAddress: true
+            DeviceIndex: 0
+            SubnetId: !Ref SubnetId
+            Groups:
+              - !Ref EC2SecurityGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum update -y
+            yum install -y docker git jq npm
+
+            systemctl enable docker
+            systemctl start docker
+
+            groupadd docker || true
+            usermod -aG docker ec2-user
+            usermod -aG wheel ec2-user
+
+            yum install -y amazon-ssm-agent       
+            yum install amazon-ecr-credential-helper -y
+            systemctl enable amazon-ssm-agent
+            systemctl start amazon-ssm-agent
+
+            curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-Linux-x86_64" -o /usr/local/bin/docker-compose
+            chmod +x /usr/local/bin/docker-compose
+
+            mkdir -p /var/compass_deploy
+
+            # Log all output (for troubleshooting)
+            exec > /var/log/user-data.log 2>&1
+
+            # Define region and account
+            REGION="${Ec2Region}"
+            ACCOUNT="${AccountId}"
+
+            # Wait for cloud-init to complete (in case Docker is not yet ready)
+            sleep 10
+
+            # Ensure Docker is running
+            systemctl start docker
+
+            # Log in to ECR using IAM role attached to the instance
+            aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
+
+            cat > /var/compass_deploy/docker-compose.yaml <<EOF
+            services:
+              api:
+                image: {api-docker-image-uri}:latest
+                depends_on:
+                  - cp_redis
+                ports:
+                  - "3233:3233"
+                networks:
+                  - app_network
+                environment:
+                  DB_CONNECTION: mysql
+                  DB_HOST: ${DBHost}
+                  DB_PORT: 3306
+                  DB_USER: ${DBUsername}
+                  DB_PASSWORD: ${DBPassword}
+                  DB_DATABASE: ${DBUsername }
+
+              website:
+                image: {website-docker-image-uri}:latest
+                depends_on:
+                  - api
+                  - admin
+                ports:
+                  - "4013:4013"
+                environment:
+                  - NEXT_PUBLIC_BASE_URL=https://api.domainname.com
+                  - NEXT_PUBLIC_CUSTOMER_URL=https://userapp.domainname.com
+                  - PORT=3003
+                networks:
+                  - app_network
+
+            networks:
+              app_network:
+                driver: bridge
+            EOF
+
+            # Create ECR login script
+            cat > /var/compass_deploy/login-ecr.sh <<'EOL'
+            #!/bin/bash
+            REGION="${Ec2Region}"
+            ACCOUNT="${AccountId}"
+
+            aws ecr get-login-password --region $REGION | \
+            docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
+            EOL
+
+            chmod +x /var/compass_deploy/login-ecr.sh
+
+            touch /var/compass_deploy/ssl-bundle.crt
+            touch /var/compass_deploy/cpcompass.key
+            touch /var/compass_deploy/mongo-init.js
+
+            docker-compose -f /var/compass_deploy/docker-compose.yaml up -d
+
+Outputs:
+  LaunchTemplateId:
+    Description: ID of the EC2 Launch Template
+    Value: !GetAtt LaunchTemplate.LaunchTemplateId
+
+  LatestVersionNumber:
+    Description: Latest version number of the EC2 Launch Template
+    Value: !GetAtt LaunchTemplate.LatestVersionNumber

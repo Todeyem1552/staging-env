@@ -1,0 +1,272 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ALB with SSL, target groups, and host-based routing
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: VPC ID
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of public subnet IDs
+
+  EC2Instance:
+    Type: String
+    Description: EC2 Instance ID to register with target groups
+
+  ElbSecurityGroup:
+    Type: String
+    Description: Security Group ID for the ELB
+
+  UserDNSName:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/dev/network/dns/user'
+    Description: DNS name for the user-facing application
+
+  AdminDNSName:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/dev/network/dns/admin'
+    Description: DNS name for the admin-facing application
+
+  ApiDNSName:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/dev/network/dns/api'
+    Description: DNS name for the API-facing application
+
+  WebsiteDNSName:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/dev/network/dns/website'
+    Description: DNS name for the website
+
+  CertificateARN:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/dev/network/ssl/certificate/arn'
+    Description: ARN of the SSL certificate for HTTPS
+
+  tagName:
+    Type: String
+    Default: 'Name'
+    Description: The tag name to use for resources
+
+  tagValue:
+    Type: String
+    Default: 'vpc'
+    Description: The tag value to use for resources
+
+Resources:
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    # DeletionPolicy: Retain
+    Properties:
+      Name: wayber-cpcompass-alb
+      Subnets: !Ref SubnetIds
+      SecurityGroups:
+        - !Ref ElbSecurityGroup
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+        - Key: deletion_protection.enabled
+          Value: 'false'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-alb'
+        - Key: !Ref tagName
+          Value: !Ref tagValue
+
+  TGUsers:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckPath: /login
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      UnhealthyThresholdCount: 2
+      HealthCheckEnabled: true
+      IpAddressType: ipv4
+      Matcher:
+        HttpCode: 200
+      Name: tg-users
+      VpcId: !Ref VpcId
+      Port: 3000
+      Protocol: HTTP
+      TargetType: instance
+      Targets:
+        - Id: !Ref EC2Instance
+
+  TGAdmin:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckPath: /login
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      UnhealthyThresholdCount: 2
+      HealthCheckEnabled: true
+      IpAddressType: ipv4
+      Matcher:
+        HttpCode: 200
+      Name: tg-admin
+      VpcId: !Ref VpcId
+      Port: 3001
+      Protocol: HTTP
+      TargetType: instance
+      Targets:
+        - Id: !Ref EC2Instance
+
+  TGApi:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      UnhealthyThresholdCount: 2
+      HealthCheckEnabled: true
+      IpAddressType: ipv4
+      Matcher:
+        HttpCode: 200
+      Name: tg-api
+      VpcId: !Ref VpcId
+      Port: 3333
+      Protocol: HTTP
+      TargetType: instance
+      Targets:
+        - Id: !Ref EC2Instance
+    
+  TGWebsite:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      UnhealthyThresholdCount: 2
+      HealthCheckEnabled: true
+      IpAddressType: ipv4
+      Matcher:
+        HttpCode: 200
+      Name: tg-website
+      VpcId: !Ref VpcId
+      Port: 3003
+      Protocol: HTTP
+      TargetType: instance
+      Targets:
+        - Id: !Ref EC2Instance
+
+  HTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: "443"
+            StatusCode: HTTP_301
+
+  HTTPSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref CertificateARN
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TGUsers
+
+  ListenerRuleUsers:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HTTPSListener
+      Priority: 1
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values:
+              - !Ref UserDNSName
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TGUsers
+
+  ListenerRuleAdmin:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HTTPSListener
+      Priority: 2
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values:
+              - !Ref AdminDNSName
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TGAdmin
+
+  ListenerRuleApi:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HTTPSListener
+      Priority: 3
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values:
+              - !Ref ApiDNSName
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TGApi
+  
+  
+  ListenerRuleWebsite:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HTTPSListener
+      Priority: 4
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values:
+              - !Ref WebsiteDNSName
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TGWebsite
+
+Outputs:
+  ALBDNSName:
+    Description: DNS name of the load balancer
+    Value: !GetAtt ALB.DNSName
+
+  ALBArn:
+    Description: ARN of the load balancer
+    Value: !GetAtt ALB.LoadBalancerArn
+  
+  TGUsersArn:
+    Description: ARN of the target group for users
+    Value: !GetAtt TGUsers.TargetGroupArn
+  
+  TGAdminArn:
+    Description: ARN of the target group for admin
+    Value: !GetAtt TGAdmin.TargetGroupArn
+
+  TGApiArn:
+    Description: ARN of the target group for API
+    Value: !GetAtt TGApi.TargetGroupArn
+  
+  TGWebsiteArn:
+    Description: ARN of the target group for website 
+    Value: !GetAtt TGWebsite.TargetGroupArn

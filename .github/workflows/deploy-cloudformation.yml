@@ -1,0 +1,58 @@
+name: Deploy CloudFormation Stack 🚀
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ${{ vars.main }}
+
+env:
+  STACK_NAME: ${{ vars.STACK_NAME }}
+  TEMPLATE_FILE: root-infra.yaml
+  S3_BUCKET_NAME: ${{ vars.S3_BUCKET_NAME }}
+  S3_BUCKET_PREFIX: nested-stack/
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+
+jobs:
+  deploy:
+    name: Safe CloudFormation Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check if stack is in ROLLBACK_COMPLETE
+        id: check-stack
+        run: |
+          set +e
+          STACK_STATUS=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].StackStatus" --output text 2>/dev/null)
+          echo "STACK_STATUS=$STACK_STATUS" >> $GITHUB_ENV
+          if [[ "$STACK_STATUS" == "ROLLBACK_COMPLETE" ]]; then
+            echo "Stack is in ROLLBACK_COMPLETE. Deleting..."
+            aws cloudformation delete-stack --stack-name $STACK_NAME
+            aws cloudformation wait stack-delete-complete --stack-name $STACK_NAME
+            echo "Stack deleted."
+          else
+            echo "Stack status: $STACK_STATUS"
+          fi
+          set -e
+
+      - name: Upload nested stacks to S3
+        run: |
+          aws s3 cp nested-stack/ s3://$S3_BUCKET_NAME/$S3_BUCKET_PREFIX --recursive --exclude "*" --include "*.yaml"
+
+      - name: Deploy root CloudFormation stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name $STACK_NAME \
+            --template-file $TEMPLATE_FILE \
+            --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+            --parameter-overrides NestedStackS3Prefix=https://$S3_BUCKET_NAME.s3.${{ env.AWS_REGION }}.amazonaws.com/$S3_BUCKET_PREFIX
