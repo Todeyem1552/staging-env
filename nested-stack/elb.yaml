@@ -76,54 +76,10 @@ Resources:
         - Key: !Ref tagName
           Value: !Ref tagValue
 
-  TGUsers:
+  Api:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       HealthCheckPath: /login
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      HealthCheckPort: traffic-port
-      HealthCheckProtocol: HTTP
-      UnhealthyThresholdCount: 2
-      HealthCheckEnabled: true
-      IpAddressType: ipv4
-      Matcher:
-        HttpCode: 200
-      Name: tg-users
-      VpcId: !Ref VpcId
-      Port: 3000
-      Protocol: HTTP
-      TargetType: instance
-      Targets:
-        - Id: !Ref EC2Instance
-
-  TGAdmin:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      HealthCheckPath: /login
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      HealthCheckPort: traffic-port
-      HealthCheckProtocol: HTTP
-      UnhealthyThresholdCount: 2
-      HealthCheckEnabled: true
-      IpAddressType: ipv4
-      Matcher:
-        HttpCode: 200
-      Name: tg-admin
-      VpcId: !Ref VpcId
-      Port: 3001
-      Protocol: HTTP
-      TargetType: instance
-      Targets:
-        - Id: !Ref EC2Instance
-
-  TGApi:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      HealthCheckPath: /
       HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
@@ -136,16 +92,16 @@ Resources:
         HttpCode: 200
       Name: tg-api
       VpcId: !Ref VpcId
-      Port: 3333
+      Port: 3233
       Protocol: HTTP
       TargetType: instance
       Targets:
         - Id: !Ref EC2Instance
-    
-  TGWebsite:
+
+  Website:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      HealthCheckPath: /
+      HealthCheckPath: /login
       HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
@@ -158,7 +114,7 @@ Resources:
         HttpCode: 200
       Name: tg-website
       VpcId: !Ref VpcId
-      Port: 3003
+      Port: 4013
       Protocol: HTTP
       TargetType: instance
       Targets:
@@ -187,7 +143,7 @@ Resources:
         - CertificateArn: !Ref CertificateARN
       DefaultActions:
         - Type: forward
-          TargetGroupArn: !Ref TGUsers
+          TargetGroupArn: !Ref Website
 
   ListenerRuleUsers:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
@@ -201,9 +157,9 @@ Resources:
               - !Ref UserDNSName
       Actions:
         - Type: forward
-          TargetGroupArn: !Ref TGUsers
+          TargetGroupArn: !Ref Api
 
-  ListenerRuleAdmin:
+  ListenerRuleWebsite:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
       ListenerArn: !Ref HTTPSListener
@@ -215,36 +171,7 @@ Resources:
               - !Ref AdminDNSName
       Actions:
         - Type: forward
-          TargetGroupArn: !Ref TGAdmin
-
-  ListenerRuleApi:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      ListenerArn: !Ref HTTPSListener
-      Priority: 3
-      Conditions:
-        - Field: host-header
-          HostHeaderConfig:
-            Values:
-              - !Ref ApiDNSName
-      Actions:
-        - Type: forward
-          TargetGroupArn: !Ref TGApi
-  
-  
-  ListenerRuleWebsite:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      ListenerArn: !Ref HTTPSListener
-      Priority: 4
-      Conditions:
-        - Field: host-header
-          HostHeaderConfig:
-            Values:
-              - !Ref WebsiteDNSName
-      Actions:
-        - Type: forward
-          TargetGroupArn: !Ref TGWebsite
+          TargetGroupArn: !Ref Website
 
 Outputs:
   ALBDNSName:
@@ -255,18 +182,10 @@ Outputs:
     Description: ARN of the load balancer
     Value: !GetAtt ALB.LoadBalancerArn
   
-  TGUsersArn:
-    Description: ARN of the target group for users
-    Value: !GetAtt TGUsers.TargetGroupArn
-  
-  TGAdminArn:
-    Description: ARN of the target group for admin
-    Value: !GetAtt TGAdmin.TargetGroupArn
-
-  TGApiArn:
+  ApiArn:
     Description: ARN of the target group for API
     Value: !GetAtt TGApi.TargetGroupArn
-  
-  TGWebsiteArn:
-    Description: ARN of the target group for website 
+
+  WebsiteArn:
+    Description: ARN of the target group for website
     Value: !GetAtt TGWebsite.TargetGroupArn
